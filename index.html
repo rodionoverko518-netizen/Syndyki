@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Сундуки онлайн</title>
+<style>
+:root{--bg:#f1e8d4;--panel:#fbf6e9;--ink:#2a2118;--mut:#7a6a55;--brass:#a8741a;--card:#fffdf6;--red:#b3312f;--line:#d8c8a6;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#101a22;--panel:#182630;--ink:#efe6d2;--mut:#98a3a8;--brass:#e0a93f;--card:#f6efdc;--red:#c8433f;--line:#2b3d49;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 Georgia,"Times New Roman",serif;min-height:100vh}
+main{max-width:920px;margin:0 auto;padding:18px 14px 40px}
+h1{font-size:2.2rem;margin:.2em 0 .1em;color:var(--brass)}
+h2{font-size:1.15rem;margin:0 0 .5em}
+p{margin:.4em 0}.mut{color:var(--mut)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin:12px 0}
+button,input,select{font:inherit;color:inherit}button{cursor:pointer}
+.btn{background:var(--brass);color:#fff;border:0;border-radius:8px;padding:9px 16px;font-weight:bold}
+.btn.alt{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.btn:disabled{opacity:.4;cursor:default}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--brass);outline-offset:2px}
+.row{display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap}
+input[type=text],select{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+.code{font-size:2.6rem;letter-spacing:.25em;font-weight:bold;color:var(--brass)}
+.players{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
+.pl{border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--panel)}
+.pl.cur{border:2px solid var(--brass)}
+.chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;min-height:24px}
+.chip{background:var(--brass);color:#fff;border-radius:5px;padding:1px 7px;font-size:.85rem;font-weight:bold}
+.opt{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:6px 12px}
+.opt.on{background:var(--brass);color:#fff;border-color:var(--brass)}
+.hand{display:flex;flex-wrap:wrap;gap:6px}
+.cd{width:50px;height:72px;background:var(--card);color:#2a2118;border:1px solid #bfae88;border-radius:7px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:1.1rem}
+.cd i{font-style:normal;font-size:1.3rem}.cd.rd{color:var(--red)}
+.log{font-size:.95rem;max-height:170px;overflow:auto}
+.log p{margin:.15em 0;color:var(--mut)}.log p:first-of-type{color:var(--ink);font-weight:bold}
+.err{color:var(--red);font-weight:bold}
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js" crossorigin="anonymous" onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';s.crossOrigin='anonymous';s.onload=function(){window.boot&&window.boot()};document.head.appendChild(s)"></script>
+<script>
+const R=['A','2','3','4','5','6','7','8','9','10','J','Q','K','★'],S=['♠','♥','♦','♣'];
+const rk=c=>c>>2,sc=c=>c&3,lab=r=>r==13?'Джокер':R[r];
+const sym=c=>rk(c)==13?'★':S[sc(c)],isRed=c=>rk(c)==13?sc(c)==0:(sc(c)==1||sc(c)==2);
+const sname=(r,s)=>r==13?(s?'чорний':'червоний'):S[s];
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const app=document.getElementById('app');
+const ls={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
+const dFor=n=>n<=4?1:n<=8?2:3;
+let me=ls.get('sk-id');if(!me){me=Math.random().toString(36).slice(2,10);ls.set('sk-id',me)}
+let peer=null,conn=null,conns={},isHost=false,code=null,myName='',LP=[],ST=null,V=null,UI={rank:null,target:null,cnt:null,suits:[]},err='';
+
+/* ---------- екрани входу ---------- */
+function home(){
+  app.innerHTML=`<h1>Сундуки онлайн</h1><p class="mut">Збирайте сундуки: усі масті одного номіналу. Два джокери — окремий сундук.</p>
+  <div class="panel"><h2>Ваше ім’я</h2><input type="text" id="nm" maxlength="16" value="${esc(ls.get('sk-name')||'')}" placeholder="Як вас звати?">
+  <div class="row"><button class="btn" data-a="create">Створити гру</button></div></div>
+  <div class="panel"><h2>Приєднатися за кодом</h2><div class="row"><input type="text" id="cd" maxlength="4" placeholder="КОД" style="width:110px;text-transform:uppercase"><button class="btn" data-a="join">Увійти</button></div></div>
+  <p class="err">${esc(err)}</p>
+  <details class="panel"><summary><b>Правила</b></summary>
+  <p>Кожному роздають по 4 карти, решта — колода. У свій хід оберіть гравця й номінал (він має бути у вас) та спитайте, чи є такий номінал.</p>
+  <p>Гравець відповідає «Так» або «Ні». Якщо «Так» — питаєте кількість, а потім масті, і він знову відповідає. Вгадали все — забираєте карти й ходите знову.</p>
+  <p>Помилились на будь-якому кроці — беріть карту з колоди, хід переходить далі.</p>
+  <p>Усі 4 масті одного номіналу (або обидва джокери) автоматично викладаються як сундук. Виграє той, хто збере найбільше.</p></details>`;
+}
+const nameVal=()=>{const n=((document.getElementById('nm')||{}).value||'').trim().slice(0,16)||'Гравець';ls.set('sk-name',n);return n};
+function fail(m){err=m;if(peer){try{peer.destroy()}catch(e){}}peer=conn=null;conns={};code=null;V=null;ST=null;home()}
+
+const OPT={host:'0.peerjs.com',port:443,path:'/',secure:true,config:{iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:global.stun.twilio.com:3478'}]}};
+const mk=id=>id?new Peer(id,OPT):new Peer(OPT);
+/* ---------- ведучий ---------- */
+function create(){
+  myName=nameVal();isHost=true;err='';
+  const A='ABCDEFGHJKMNPQRSTUVWXYZ';code=Array.from({length:4},()=>A[Math.random()*A.length|0]).join('');
+  peer=mk('sunduky-'+code);
+  peer.on('open',()=>{LP=[{id:me,name:myName}];bc()});
+  peer.on('error',e=>{if(e.type=='unavailable-id'){try{peer.destroy()}catch(x){}create()}else fail('Немає зв’язку з сервером. Перевірте інтернет.')});
+  peer.on('connection',c=>{
+    c.on('data',m=>hostMsg(c,m));
+    c.on('close',()=>{for(const id in conns)if(conns[id]===c)delete conns[id]});
+  });
+}
+function hostMsg(c,m){
+  if(m.t=='hello'){
+    if(ST){if(ST.order.includes(m.id)){conns[m.id]=c;bc()}else c.send({t:'err',m:'Ця гра вже почалася.'});return}
+    if(LP.length>=10){c.send({t:'err',m:'У грі вже 10 гравців.'});return}
+    if(!LP.find(p=>p.id==m.id))LP.push({id:m.id,name:String(m.name).slice(0,16)});
+    conns[m.id]=c;bc();
+  }else if(['ask','count','suits','ans'].includes(m.t)){const id=Object.keys(conns).find(k=>conns[k]===c);if(id)apply(id,m)}
+}
+function view(u){
+  if(!ST)return{phase:'lobby',code,players:LP.map(p=>p.name),host:isHost};
+  return{phase:ST.phase,order:ST.order,names:ST.names,cnt:Object.fromEntries(ST.order.map(x=>[x,ST.hands[x].length])),ch:ST.ch,cur:ST.cur,deck:ST.deck.length,d:ST.d,log:ST.log,q:ST.q||null,mine:ST.hands[u]||[]};
+}
+function bc(){
+  err='';V=view(me);V.host=true;V.code=code;render();
+  for(const id in conns)if(conns[id].open)conns[id].send({t:'v',v:Object.assign(view(id),{code})});
+}
+const addLog=t=>{ST.log.unshift(t);ST.log.length=Math.min(ST.log.length,25)};
+function chests(u){
+  const h=ST.hands[u];
+  for(let r=0;r<14;r++)while(true){
+    const n=r==13?2:4;if(new Set(h.filter(c=>rk(c)==r).map(sc)).size<n)break;
+    for(let s=0;s<n;s++)h.splice(h.indexOf(r*4+s),1);
+    ST.ch[u].push(r);addLog(`${ST.names[u]} збирає сундук «${lab(r)}»!`);
+  }
+}
+function ensure(u){if(!ST.hands[u].length&&ST.deck.length){for(let k=0;k<4&&ST.deck.length;k++)ST.hands[u].push(ST.deck.pop());chests(u)}}
+const over=()=>!ST.deck.length&&ST.order.filter(u=>ST.hands[u].length).length<=1;
+function advance(){
+  if(over()){ST.phase='over';return}
+  const n=ST.order.length;
+  for(let k=1;k<=n;k++){const i=(ST.cur+k)%n,u=ST.order[i];ensure(u);if(ST.hands[u].length){ST.cur=i;return}}
+  ST.phase='over';
+}
+function start(){
+  if(!isHost||LP.length<2)return;
+  const d=dFor(LP.length),deck=[];
+  for(let k=0;k<d;k++){for(let c=0;c<52;c++)deck.push(c);deck.push(52,53)}
+  for(let i=deck.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[deck[i],deck[j]]=[deck[j],deck[i]]}
+  ST={phase:'play',d,deck,hands:{},ch:{},names:{},order:LP.map(p=>p.id),cur:0,log:[`Гра почалася. Колод: ${d}.`]};
+  LP.forEach(p=>{ST.names[p.id]=p.name;ST.ch[p.id]=[];ST.hands[p.id]=[]});
+  ST.order.forEach(u=>{for(let k=0;k<4;k++)ST.hands[u].push(ST.deck.pop())});
+  ST.order.forEach(chests);bc();
+}
+function toast(u,m){if(u==me){err=m;render()}else if(conns[u]&&conns[u].open)conns[u].send({t:'toast',m})}
+function failQ(why){
+  const q=ST.q;ST.q=null;addLog(`${ST.names[q.from]} не вгадав (${why}). Бере карту з колоди.`);
+  if(ST.deck.length)ST.hands[q.from].push(ST.deck.pop());
+  chests(q.from);advance();bc();
+}
+function apply(u,a){
+  if(!ST||ST.phase!='play')return;
+  const cur=ST.order[ST.cur],q=ST.q;
+  if(a.t=='ask'){
+    const t=a.target,r=+a.rank;
+    if(q||u!=cur||!ST.hands[t]||t==u||!ST.hands[t].length||!ST.hands[u].some(c=>rk(c)==r))return;
+    ST.q={from:u,to:t,rank:r,stage:'has_ans'};addLog(`${ST.names[u]} питає ${ST.names[t]}: чи є «${lab(r)}»?`);bc();
+  }else if(a.t=='count'){
+    if(!q||u!=q.from||q.stage!='count_pick')return;
+    const n=Math.floor(+a.cnt);if(!(n>=1&&n<=(q.rank==13?2:4)*ST.d))return;
+    q.cnt=n;q.stage='count_ans';addLog(`${ST.names[u]}: чи рівно ${n} шт.?`);bc();
+  }else if(a.t=='suits'){
+    if(!q||u!=q.from||q.stage!='suits_pick'||!Array.isArray(a.suits)||a.suits.length!=q.cnt)return;
+    q.suits=a.suits.map(Number).sort();q.stage='suits_ans';
+    addLog(`${ST.names[u]}: масті — ${q.suits.map(x=>sname(q.rank,x)).join(', ')}. Так?`);bc();
+  }else if(a.t=='ans'){
+    if(!q||u!=q.to||!q.stage.endsWith('_ans'))return;
+    const th=ST.hands[q.to].filter(c=>rk(c)==q.rank);
+    const truth=q.stage=='has_ans'?th.length>0:q.stage=='count_ans'?th.length==q.cnt:th.map(sc).sort().join()==q.suits.join();
+    if(!!a.yes!==truth){toast(u,'Перевірте свої карти: ця відповідь не збігається з вашою рукою.');return}
+    addLog(`${ST.names[u]}: ${a.yes?'Так':'Ні'}.`);
+    if(!a.yes)return failQ(q.stage=='has_ans'?'такого номіналу немає':q.stage=='count_ans'?'кількість не та':'масті не ті');
+    if(q.stage=='has_ans'){q.stage='count_pick';bc()}
+    else if(q.stage=='count_ans'){q.stage='suits_pick';bc()}
+    else{
+      const f=q.from;ST.hands[q.to]=ST.hands[q.to].filter(c=>rk(c)!=q.rank);ST.hands[f].push(...th);ST.q=null;
+      addLog(`${ST.names[f]} вгадав усе: забирає «${lab(q.rank)}» (${th.length} шт.) і ходить знову!`);
+      chests(f);ensure(f);if(!(ST.hands[f].length&&!over()))advance();bc();
+    }
+  }
+}
+
+/* ---------- гравець ---------- */
+function join(){
+  myName=nameVal();isHost=false;err='';
+  code=((document.getElementById('cd')||{}).value||'').trim().toUpperCase();
+  if(code.length!=4){err='Введіть код із 4 літер.';return home()}
+  app.innerHTML='<h1>Сундуки онлайн</h1><p class="mut">Підключення…</p>';
+  peer=mk();
+  const to=setTimeout(()=>fail('Не вдалося підключитися. Перевірте код та інтернет.'),15000);
+  peer.on('error',e=>{clearTimeout(to);fail(e.type=='peer-unavailable'?'Гру з таким кодом не знайдено.':'Немає зв’язку з сервером.')});
+  peer.on('open',()=>{
+    conn=peer.connect('sunduky-'+code,{reliable:true});
+    conn.on('open',()=>{clearTimeout(to);conn.send({t:'hello',id:me,name:myName})});
+    conn.on('data',m=>{if(m.t=='v'){err='';V=m.v;V.host=false;render()}else if(m.t=='toast'){err=m.m;render()}else if(m.t=='err')fail(m.m)});
+    conn.on('close',()=>fail('Зв’язок із ведучим втрачено.'));
+  });
+}
+function send(a){if(isHost)apply(me,a);else conn.send(a)}
+
+/* ---------- відображення ---------- */
+function render(){
+  if(!V)return;
+  let h='<h1>Сундуки онлайн</h1>';
+  if(V.phase=='lobby'){
+    h+=`<div class="panel"><p class="mut">Код гри — повідомте його друзям:</p><div class="code">${esc(V.code)}</div>
+    <h2>Гравці (${V.players.length})</h2><ul>${V.players.map(n=>`<li>${esc(n)}</li>`).join('')}</ul>
+    ${V.host?`<button class="btn" data-a="start" ${V.players.length<2?'disabled':''}>Почати гру</button><p class="mut">Від 2 до 10 гравців. Не закривайте цю вкладку: ведучий тримає гру.</p>`:'<p class="mut">Чекаємо, поки ведучий почне гру…</p>'}</div>`;
+  }else{
+    const cur=V.order[V.cur],total=Object.values(V.ch).reduce((a,x)=>a+x.length,0);
+    if(V.phase=='over'){
+      const s=[...V.order].sort((a,b)=>V.ch[b].length-V.ch[a].length),top=V.ch[s[0]].length,w=s.filter(u=>V.ch[u].length==top);
+      h+=`<div class="panel"><h2>Гра закінчена</h2><p><b>${w.length>1?'Перемагають: ':'Перемагає: '}${w.map(u=>esc(V.names[u])).join(', ')}</b> — сундуків: ${top}.</p>
+      <ol>${s.map(u=>`<li>${esc(V.names[u])}: ${V.ch[u].length} (${V.ch[u].map(lab).join(', ')||'—'})</li>`).join('')}</ol><button class="btn" data-a="exit">Нова гра</button></div>`;
+    }else{
+      h+=`<p><b>Ходить: ${esc(V.names[cur])}${cur==me?' (ви)':''}</b> <span class="mut">· у колоді: ${V.deck} · сундуків викладено: ${total}</span></p>
+      <div class="players">${V.order.map(u=>`<div class="pl ${u==cur?'cur':''}"><b>${esc(V.names[u])}${u==me?' (ви)':''}</b><span class="mut">карт: ${V.cnt[u]}</span><div class="chips">${V.ch[u].map(r=>`<span class="chip">${R[r]}</span>`).join('')}</div></div>`).join('')}</div>
+      <div class="panel"><h2>Ваші карти</h2><div class="hand">${[...V.mine].sort((a,b)=>a-b).map(c=>`<div class="cd ${isRed(c)?'rd':''}"><b>${R[rk(c)]}</b><i>${sym(c)}</i></div>`).join('')||'<span class="mut">Порожньо</span>'}</div></div>`;
+      h+=form();
+    }
+  }
+  h+=`<p class="err">${esc(err)}</p><div class="panel log"><h2>Журнал</h2>${(V.log||[]).map(t=>`<p>${esc(t)}</p>`).join('')}</div>${V.phase=='over'?'':'<button class="btn alt" data-a="exit">Вийти</button>'}`;
+  app.innerHTML=h;
+}
+function form(){
+  const q=V.q,cur=V.order[V.cur];
+  if(q){
+    const F=esc(V.names[q.from]),T=esc(V.names[q.to]),rn=lab(q.rank);
+    if(q.to==me&&q.stage.endsWith('_ans')){
+      const txt=q.stage=='has_ans'?`чи є у вас «${rn}»?`:q.stage=='count_ans'?`чи рівно ${q.cnt} шт. «${rn}» у вас?`:`чи саме такі масті: ${q.suits.map(x=>sname(q.rank,x)).join(', ')}?`;
+      return `<div class="panel"><h2>${F} питає: ${txt}</h2><p class="mut">Відповідайте чесно — гра перевіряє по вашій руці.</p><div class="row"><button class="btn" data-a="ans" data-v="1">Так</button><button class="btn alt" data-a="ans" data-v="0">Ні</button></div></div>`;
+    }
+    if(q.from==me&&q.stage=='count_pick'){
+      const max=(q.rank==13?2:4)*V.d;
+      return `<div class="panel"><h2>Є! Скільки «${rn}» у ${T}?</h2><div class="row">${Array.from({length:max},(_,i)=>`<button class="opt ${UI.cnt==i+1?'on':''}" data-a="n" data-v="${i+1}">${i+1}</button>`).join('')}</div><button class="btn" data-a="count" ${UI.cnt?'':'disabled'}>Запитати: чи рівно стільки?</button></div>`;
+    }
+    if(q.from==me&&q.stage=='suits_pick'){
+      return `<div class="panel"><h2>Так! Які масті «${rn}» у ${T}?</h2><div class="row">${Array.from({length:q.cnt},(_,i)=>`<select data-s="${i}" aria-label="Масть ${i+1}">${(q.rank==13?[0,1]:[0,1,2,3]).map(x=>`<option value="${x}" ${(UI.suits[i]||0)==x?'selected':''}>${sname(q.rank,x)}</option>`).join('')}</select>`).join('')}</div><button class="btn" data-a="suits">Запитати: чи такі масті?</button></div>`;
+    }
+    return `<div class="panel"><p class="mut">${F} питає ${T} про «${rn}» — чекаємо відповіді…</p></div>`;
+  }
+  if(cur!=me)return '';
+  const ranks=[...new Set(V.mine.map(rk))].sort((a,b)=>a-b),tg=V.order.filter(u=>u!=me&&V.cnt[u]),r=UI.rank;
+  return `<div class="panel"><h2>Ваш хід</h2><p class="mut">Спершу питаєте, чи є номінал. Далі — кількість, потім масті. Помилка на будь-якому кроці — беріть карту з колоди.</p>
+  <p>1. У кого питаємо:</p><div class="row">${tg.map(u=>`<button class="opt ${UI.target==u?'on':''}" data-a="t" data-v="${u}">${esc(V.names[u])}</button>`).join('')}</div>
+  <p>2. Номінал (з вашої руки):</p><div class="row">${ranks.map(x=>`<button class="opt ${r===x?'on':''}" data-a="r" data-v="${x}">${R[x]}</button>`).join('')}</div>
+  <button class="btn" data-a="ask" ${UI.target&&r!=null?'':'disabled'}>Запитати: чи є?</button></div>`;
+}
+document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,v=b.dataset.v;
+  try{
+  if(a=='create'||a=='join'){
+    if(typeof Peer=='undefined'||!window.RTCPeerConnection){err='Цей браузер не підтримує зв’язок між пристроями. Відкрийте сторінку в Chrome або Safari (не у вбудованому браузері месенджера).';return home()}
+  }
+  if(a=='create')create();else if(a=='join')join();else if(a=='start')start();
+  else if(a=='exit'){err='';fail('')}
+  else if(a=='ask'){send({t:'ask',target:UI.target,rank:UI.rank});UI={rank:null,target:null,cnt:null,suits:[]}}
+  else if(a=='count'){send({t:'count',cnt:UI.cnt});UI.suits=Array(UI.cnt).fill(0);UI.cnt=null}
+  else if(a=='suits'){send({t:'suits',suits:Array.from({length:V.q.cnt},(_,i)=>UI.suits[i]||0)});UI={rank:null,target:null,cnt:null,suits:[]}}
+  else if(a=='ans')send({t:'ans',yes:v=='1'});
+  else{if(a=='t')UI.target=v;if(a=='r'){UI.rank=+v;UI.cnt=null;UI.suits=[]}if(a=='n'){UI.cnt=+v}render()}
+  }catch(x){fail('Помилка: '+(x&&x.message||x)+' | '+String(x&&x.stack||'').slice(0,300)+' | '+location.protocol)}
+});
+window.addEventListener('error',e=>{app.insertAdjacentHTML('afterbegin','<p class="err">Помилка: '+esc(e.message)+(e.filename?' ('+esc(e.filename.split('/').pop())+':'+e.lineno+')':'')+'</p><pre style="white-space:pre-wrap;font-size:.75rem">'+esc((e.error&&e.error.stack||'').slice(0,500))+'</pre><p class="mut">Адреса сторінки: '+esc(location.protocol+'//'+(location.host||'(файл)'))+'</p>')});
+document.addEventListener('change',e=>{const s=e.target.dataset&&e.target.dataset.s;if(s!=null)UI.suits[+s]=+e.target.value});
+let booted=false;
+function boot(){if(booted||typeof Peer=='undefined')return;booted=true;home()}
+window.boot=boot;
+window.addEventListener('load',()=>{
+  boot();
+  if(!booted)setTimeout(()=>{if(!booted){app.innerHTML='<h1>Сундуки онлайн</h1><p class="err">Не завантажилась бібліотека зв’язку. Потрібен інтернет, а файл має відкриватися як звичайна сторінка в браузері (не у вбудованому перегляді).</p>'}},5000);
+});
+</script>
+</body>
+</html>
